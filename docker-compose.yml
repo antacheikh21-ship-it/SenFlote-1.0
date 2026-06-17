@@ -1,0 +1,169 @@
+version: '3.8'
+
+services:
+  # ─── Laravel App ────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: senflote_app
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - ./backend:/var/www
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-senflote}
+      - DB_USERNAME=${DB_USERNAME:-senflote}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - QUEUE_CONNECTION=redis
+      - BROADCAST_CONNECTION=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - senflote_net
+
+  # ─── Nginx Web Server ────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: senflote_nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./backend:/var/www
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - senflote_net
+
+  # ─── PostgreSQL + PostGIS ────────────────────────────────────────────────────
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: senflote_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-senflote}
+      POSTGRES_USER: ${DB_USERNAME:-senflote}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-senflote}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - senflote_net
+
+  # ─── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: senflote_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - senflote_net
+
+  # ─── Laravel Queue Worker ────────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: senflote_worker
+    restart: unless-stopped
+    working_dir: /var/www
+    command: php artisan queue:work redis --queue=gps,default --sleep=3 --tries=3 --max-time=3600
+    volumes:
+      - ./backend:/var/www
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-senflote}
+      - DB_USERNAME=${DB_USERNAME:-senflote}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - QUEUE_CONNECTION=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - senflote_net
+
+  # ─── Traccar GPS Server ──────────────────────────────────────────────────────
+  traccar:
+    image: traccar/traccar:latest
+    container_name: senflote_traccar
+    restart: unless-stopped
+    ports:
+      - "8082:8082"   # Traccar Web UI
+      - "5000-5150:5000-5150"  # GPS device protocols
+      - "5000-5150:5000-5150/udp"
+    volumes:
+      - traccar_data:/opt/traccar/data
+      - ./docker/traccar/traccar.xml:/opt/traccar/conf/traccar.xml
+    networks:
+      - senflote_net
+
+  # ─── Laravel Scheduler ──────────────────────────────────────────────────────
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: senflote_scheduler
+    restart: unless-stopped
+    working_dir: /var/www
+    command: >
+      sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
+    volumes:
+      - ./backend:/var/www
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-senflote}
+      - DB_USERNAME=${DB_USERNAME:-senflote}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - app
+    networks:
+      - senflote_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  traccar_data:
+
+networks:
+  senflote_net:
+    driver: bridge

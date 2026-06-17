@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE properties SYSTEM 'http://java.sun.com/dtd/properties.dtd'>
+<properties>
+    <!-- Internal H2 DB for Traccar (positions are forwarded to Laravel via webhook) -->
+    <entry key='database.driver'>org.h2.Driver</entry>
+    <entry key='database.url'>jdbc:h2:/opt/traccar/data/database</entry>
+    <entry key='database.user'>sa</entry>
+    <entry key='database.password'></entry>
+
+    <!-- Forward every GPS position to the Laravel webhook (fires on each position update) -->
+    <entry key='forward.enable'>true</entry>
+    <entry key='forward.url'>http://nginx/api/v1/gps/ingest</entry>
+    <entry key='forward.header'>X-Traccar-Secret: traccar-shared-secret</entry>
+
+    <!-- Also forward Traccar events (geofence, speeding, etc.) -->
+    <entry key='event.forward.enable'>true</entry>
+    <entry key='event.forward.url'>http://nginx/api/v1/gps/ingest/events</entry>
+    <entry key='event.forward.header'>X-Traccar-Secret: traccar-shared-secret</entry>
+
+    <!-- Web UI port -->
+    <entry key='web.port'>8082</entry>
+
+    <!-- GPS protocol listeners (subset — add more as needed) -->
+    <entry key='gt06.port'>5001</entry>
+    <entry key='teltonika.port'>5027</entry>
+    <entry key='osmand.port'>5055</entry>
+    <entry key='tk103.port'>5002</entry>
+</properties>
